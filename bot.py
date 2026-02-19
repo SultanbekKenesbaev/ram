@@ -244,6 +244,69 @@ def now_local() -> datetime:
 def combine(day: date, t: dtime) -> datetime:
     return datetime.combine(day, t)
 
+def format_duration(delta: timedelta) -> str:
+    total_seconds = max(0, int(delta.total_seconds()))
+    total_minutes = total_seconds // 60
+    days, rem_minutes = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(rem_minutes, 60)
+    if days:
+        return f"{days}д {hours}ч {minutes}м"
+    if hours:
+        return f"{hours}ч {minutes}м"
+    return f"{minutes}м"
+
+def find_next_day_times(start_day: date) -> Optional[Tuple[date, dtime, dtime]]:
+    schedule = load_schedule()
+    if not schedule:
+        return None
+    future_days = [d for d in schedule.keys() if d >= start_day]
+    if not future_days:
+        return None
+    next_day = min(future_days)
+    sah, ift = schedule[next_day]
+    return next_day, sah, ift
+
+def format_today_status(now: datetime) -> str:
+    today = now.date()
+    times = load_day_times(today)
+    if not times:
+        return "📅 <b>Сегодня:</b>\n" + format_day_info(today)
+
+    sah_t, ift_t = times
+    sah_dt = combine(today, sah_t)
+    ift_dt = combine(today, ift_t)
+
+    lines = [
+        "📅 <b>Сегодня:</b>",
+        f"🌙 Сахарлик: <b>{sah_t.strftime('%H:%M')}</b>",
+        f"🌅 Ифтар: <b>{ift_t.strftime('%H:%M')}</b>",
+        "",
+    ]
+
+    # До окончания сахарлика показываем оба счётчика.
+    if now < sah_dt:
+        lines.append(f"⏳ До сахарлика: <b>{format_duration(sah_dt - now)}</b>")
+        lines.append(f"⏳ До ифтара: <b>{format_duration(ift_dt - now)}</b>")
+        return "\n".join(lines)
+
+    # Днём между сахарликом и ифтаром показываем только до ифтара.
+    if now < ift_dt:
+        lines.append(f"⏳ До ифтара: <b>{format_duration(ift_dt - now)}</b>")
+        return "\n".join(lines)
+
+    # После ифтара показываем до следующего сахарлика.
+    next_times = find_next_day_times(today + timedelta(days=1))
+    if not next_times:
+        lines.append("⚠️ Не нашёл следующий сахарлик в time.txt")
+        return "\n".join(lines)
+
+    next_day, next_sah_t, _ = next_times
+    next_sah_dt = combine(next_day, next_sah_t)
+    lines.append("🌙 Ифтар уже прошёл.")
+    lines.append(f"⏳ До следующего сахарлика: <b>{format_duration(next_sah_dt - now)}</b>")
+    lines.append(f"📌 Ближайшая дата: <b>{next_day.isoformat()}</b>")
+    return "\n".join(lines)
+
 def format_day_info(day: date) -> str:
     resolved = resolve_day_times(day)
     if not resolved:
@@ -289,8 +352,7 @@ async def cmd_start(msg: Message):
 
 @dp.message(F.text == "📅 Сегодня")
 async def h_today(msg: Message):
-    today = now_local().date()
-    await msg.answer("📅 <b>Сегодня:</b>\n" + format_day_info(today), reply_markup=main_menu_kb())
+    await msg.answer(format_today_status(now_local()), reply_markup=main_menu_kb())
 
 @dp.message(F.text == "🌙 Сахарлик")
 async def h_saharlik(msg: Message):
